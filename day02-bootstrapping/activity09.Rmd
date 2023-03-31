@@ -6,3 +6,133 @@ output: github_document
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
+
+## Task 1: Load the necessary packages
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+```
+
+## Task 2: Create the data
+
+To help conceptualize bootstrapping to traditional methods that we explore earlier this semester, we will create our own dataset. This way, we will know the truth about the population from which we are drawing data and can compare how bootstrapping and the traditional methods compare (and are different).
+
+```{r}
+# Create a data frame/tibble named sim_dat
+sim_dat <- tibble(
+# Explain what next line is doing
+  x1 = runif(20, -5, 5),
+# Explain what next line is doing
+  x2 = runif(20, 0, 100),
+# Explain what next line is doing
+  x3 = rbinom(20, 1, 0.5)
+  )
+
+b0 <- 2
+b1 <- 0.25
+b2 <- -0.5
+b3 <- 1
+sigma <- 1.5
+
+errors <- rnorm(20, 0, sigma)
+
+sim_dat <- sim_dat %>% 
+  mutate(
+    y = b0 + b1*x1 + b2*x2 + b3*x3 + errors,
+    x3 = case_when(
+      x3 == 0 ~ "No",
+      TRUE ~ "Yes"
+      )
+    )
+```
+
+## Task 3: Traditional MLR model
+
+First we will fit an estimated model to our simulated data. Recall that we have done some similar work in past activities, but for ease of searching I will tell you what to do.
+
+```{r}
+mlr_fit <- linear_reg() %>%
+  set_mode("regression") %>% 
+  set_engine("lm") %>% 
+  fit(y ~ x1 + x2 + x3, data = sim_dat)
+
+# Also include the confidence intervals for our estimated slope parameters
+tidy(mlr_fit, conf.int = TRUE)
+```
+
+Answer the following question:
+
+Looking at your population-level model from (2), how accurate are your results? Explain how you made this decision. That is, what did you use from your output and how did you use that information to decide?
+
+## Task 4: Bootstrapping
+
+```{r}
+# Set a random seed value so we can obtain the same "random" results
+set.seed(631)
+
+# Generate the 2000 bootstrap samples
+boot_samps <- sim_dat %>% 
+  bootstraps(times = 2000)
+
+boot_samps
+```
+
+### When viewing this outputted object, it probably looks a little odd. This is a nested data set with two columns:
+
+### splits: An rsplit object that has two main components: an analysis dataset and an assessment dataset.
+### id: A label of which bootstrap sample it is.
+### You can view the first analysis dataset by typing the following in your Console:
+
+### boot_samps$splits[[1]] %>% analysis()
+### And the first assessment dataset by typing the following in your Console:
+
+### boot_samps$splits[[1]] %>% assessment()
+
+```{r}
+# Create a function that fits a fixed MLR model to one split dataset
+fit_mlr_boots <- function(split) {
+  lm(y ~ x1 + x2 + x3, data = analysis(split))
+}
+
+# Fit the model to each split and store the information
+# Also, obtain the tidy model information
+boot_models <- boot_samps %>% 
+  mutate(
+    model = map(splits, fit_mlr_boots),
+    coef_info = map(model, tidy)
+    )
+
+boots_coefs <- boot_models %>% 
+  unnest(coef_info)
+
+boots_coefs
+```
+
+We can then calculate the bootstrap intervals by obtaining the 2.5th and 97.5th percentiles - similar to a 95% confidence interval as we are finding the values that contain the middle 95% of the bootstrap values. Note that we provide the level of significance (1 - confidence level): alpha = 0.05 = 1 - 0.95.
+
+```{r}
+boot_int <- int_pctl(boot_models, statistics = coef_info, alpha = 0.05)
+boot_int
+```
+
+Visualizing the above information to get a sense of the variability of my estimates.
+
+```{r}
+ggplot(boots_coefs, aes(x = estimate)) +
+  geom_histogram(bins = 30) +
+  facet_wrap( ~ term, scales = "free") +
+  geom_vline(data = boot_int, aes(xintercept = .lower), col = "blue") +
+  geom_vline(data = boot_int, aes(xintercept = .upper), col = "blue")
+```
+
+Answer the following question:
+
+Looking at your population-level model from (2), how accurate are your results? Explain how you made this decision. That is, what did you use from your output and how did you use that information to decide?
+
+Challenge:
+Adding to your previous code chunk, add the following:
+
+A pair of red lines that correspond to the traditional method’s 95% confidence intervals
+A single green line that corresponds to the population slope value (there should be a unique green line in each plot)
+
